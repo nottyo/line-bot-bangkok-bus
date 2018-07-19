@@ -7,7 +7,8 @@ from linebot import (
 )
 
 from linebot.models import (
-    LocationMessage, MessageEvent, TextSendMessage, LocationSendMessage
+    LocationMessage, MessageEvent, TextSendMessage, LocationSendMessage, ConfirmTemplate, PostbackAction,
+    TemplateSendMessage, PostbackEvent
 )
 from linebot.exceptions import (
     LineBotApiError, InvalidSignatureError
@@ -77,14 +78,20 @@ def get_arrival_data(stop_name):
     response = requests.post(api_url, data=payload)
     if response.status_code == 200:
         json = response.json()
-        print(json)
         text = 'สายที่กำลังจะเข้ามา: \n'
         for number, route_data in json.items():
-            if route_data['bound'] == 'ขาออก':
-                text += 'สาย {0} รออีก {1}\n'.format(route_data['bus_line'], route_data['duration_text'])
+            text += 'สาย {0} รออีก {1}\n'.format(route_data['bus_line'], route_data['duration_text'])
         return text
     else:
         return ''
+
+
+@handler.add(PostbackEvent)
+def handle_postback(event):
+    if 'answer=YES' in event.postback.data:
+        stop_name = str(event.postback.data).split('&')[1].split('=')[1]
+        result = get_arrival_data(stop_name)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=result))
 
 
 @handler.add(MessageEvent, message=LocationMessage)
@@ -99,11 +106,8 @@ def handle_location_message(event):
         for stop_id, stop_data in json.items():
             if stop_data['radius'] < 0.1:
                 text = 'ป้ายที่ใกล้ที่สุด: {0}\n'.format(stop_data['stop_name'])
-                ### FOR DEMO
-                text += 'สายที่กำลังจะเข้ามา: {0}'.format(stop_data['bus_line_inbound'])
-
-                ### add more information
-                # text += get_arrival_data(stop_data['stop_name'])
+                text += 'สายรถเมล์ขาเข้า: {0}\n'.format(stop_data['bus_line_inbound'])
+                text += 'สายรถเมล์ขาออก: {0}'.format(stop_data['bus_line_outbound'])
 
                 reply_messages.append(TextSendMessage(text=text))
                 reply_messages.append(LocationSendMessage(
@@ -112,8 +116,16 @@ def handle_location_message(event):
                     latitude=stop_data["latitude"],
                     longitude=stop_data["longitude"]
                 ))
+                confirm_template = ConfirmTemplate(
+                    text="คำนวณเวลามาถึง?",
+                    actions=[
+                        PostbackAction(label='YES', data='answer=YES&stop_name={0}'.format(stop_data['stop_name']), display_text='YES'),
+                        PostbackAction(label='NO', data='No', display_text='NO')
+                    ]
+                )
                 break
 
+    reply_messages.append(TemplateSendMessage(template=confirm_template, alt_text='Confirm Arrival Time!'))
     line_bot_api.reply_message(event.reply_token, messages=reply_messages)
 
 
